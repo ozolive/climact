@@ -1,4 +1,6 @@
 #!/usr/bin/python
+# coding: utf-8
+
 import plotly
 from plotly.graph_objs import Scatter, Layout
 import plotly.plotly as py
@@ -25,8 +27,6 @@ def read_data(csvfile):
 		header_tmp = row
                 header = []
                 for key in header_tmp:
-                    if (key == "LEQUEL") or (key == "LAQUELLE"):
-                        key = "LEQUEL " + last_key
                     header.append(key)
                     last_key = key
 	    else:
@@ -55,8 +55,59 @@ print header
 
 tvars = ['t1','t2','r1','r2']
 hvars = ['h1','h2']
-avars = ['a0','a1','a2','a3']
+avars = ['a1','a2','a3','a4']
 
+leg_vars = {
+  't1': {
+     'name': 'Inside temp (C)',
+     'legendgroup' : 'inside',
+   },
+  'h1': {
+     'name': 'Inside Rel. Humidity (%)',
+     'legendgroup' : 'inside',
+   },
+  'r1': {
+     'name': 'Point de rosée intérieur',
+     'legendgroup' : 'inside',
+   },
+  't2': {
+     'name': 'Outside temp (C)',
+     'legendgroup' : 'outside',
+   },
+  'h2': {
+     'name': 'Outside Rel. Humidity (%)',
+     'legendgroup' : 'outside',
+   },
+  'r2': {
+     'name': 'Point de rosée extérieur',
+     'legendgroup' : 'outside',
+   },
+  'a0': {
+     'name': 'Secheresse 0',
+     'legendgroup' : 'moisture',
+   },
+
+  'a1': {
+     'name': 'Secheresse 1',
+     'legendgroup' : 'moisture',
+   },
+  'a2': {
+     'name': 'Secheresse 2',
+     'legendgroup' : 'moisture',
+   },
+  'a3': {
+     'name': 'Secheresse 3',
+     'legendgroup' : 'moisture',
+   },
+  'a4': {
+     'name': 'Ampérage',
+     'legendgroup' : 'elec',
+   },
+  'wt': {
+     'name': 'Cumulated watering seconds',
+     'legendgroup' : 'elec',
+   },
+}
 
 def trace_var(var,coeff=1.0):
     y=[]
@@ -116,15 +167,17 @@ hdata=[]
 adata=[]
 
 for var in tvars:
-    adata.append(Scatter(x=x, y=trace_var(var)))
+    adata.append(Scatter(x=x, y=trace_var(var), legendgroup=leg_vars[var]['legendgroup'], name= leg_vars[var]['name']))
 #time_plot(pdata)
 
 for var in hvars:
-    adata.append(Scatter(x=x, y=trace_var(var)))
+    #adata.append(Scatter(x=x, y=trace_var(var)))
+    adata.append(Scatter(x=x, y=trace_var(var), legendgroup=leg_vars[var]['legendgroup'], name= leg_vars[var]['name']))
 #time_plot(hdata)
 
 for var in avars:
-    adata.append(Scatter(x=x, y=trace_var(var,0.1)))
+#    adata.append(Scatter(x=x, y=trace_var(var,0.1)))
+    adata.append(Scatter(x=x, y=trace_var(var,0.1), legendgroup=leg_vars[var]['legendgroup'], name= leg_vars[var]['name']))
 time_plot(adata)
 
 
