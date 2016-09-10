@@ -20,6 +20,8 @@
 #define HZ 100
 #define SAMPLING_PERIOD  5 //seconds. Minimum 2s for DHT22
 
+const uint8_t relay_pins[] = {3,4};
+
 const int kCePin   = 5;  // Chip Enable
 const int kIoPin   = 6;  // Input/Output
 const int kSclkPin = 7;  // Serial Clock
@@ -29,6 +31,7 @@ long called = 0;
 
 #define ANALOG_PINS 6
 int analog[ANALOG_PINS];
+
 
 // Create a DS1302 object.
 DS1302 rtc(kCePin, kIoPin, kSclkPin);
@@ -44,7 +47,10 @@ DS1302 rtc(kCePin, kIoPin, kSclkPin);
 #define O_PWR  8
 
 
+#define SOIL_EN 10
 
+#define HBRIDGE_2 11
+#define HBRIDGE_1 12
 
 
 #define DHTTYPE DHT22
@@ -96,6 +102,22 @@ sensor_state state[4];
 
 boolean first = true;
 
+void open_gardena_solenoid(){
+    digitalWrite(HBRIDGE_1, HIGH);
+    delay(500);
+    digitalWrite(HBRIDGE_1, LOW);
+    delay(150);
+}
+
+void close_gardena_solenoid(){
+    digitalWrite(HBRIDGE_2, HIGH);
+    delay(150);
+    digitalWrite(HBRIDGE_2, LOW);
+    delay(150);
+}
+
+
+
 void setup() {
   //Serial.begin(115200);
   Serial.begin(9600);
@@ -113,10 +135,34 @@ void setup() {
   pinMode(13, OUTPUT); // Led set off
   digitalWrite(13, LOW);
 
+
+  pinMode(SOIL_EN, OUTPUT); // Dont throw current to roots allthetime
+  digitalWrite(SOIL_EN, LOW);
+
+  pinMode(HBRIDGE_1, OUTPUT); // 
+  digitalWrite(HBRIDGE_1, LOW);
+
+  pinMode(HBRIDGE_2, OUTPUT); // 
+  digitalWrite(HBRIDGE_2, LOW);
+
+
   Time t = rtc.time();
   setTime(t.hr, t.min, t.sec, t.date, t.mon, t.yr);
 
+  for(uint8_t r=0;r<sizeof(relay_pins);r++) {
+    pinMode(relay_pins[r], OUTPUT); // 
+    digitalWrite(relay_pins[r], HIGH);
+  }
+
+  digitalWrite(relay_pins[0],LOW);
+  delay(3000);
+  digitalWrite(relay_pins[0],HIGH);
+
   Serial.print("Hello i'm Perceptor v0.1\n");
+  open_gardena_solenoid();
+  delay(1000);
+  close_gardena_solenoid();
+
 }
 
 char buffer [32];
@@ -398,7 +444,12 @@ while (Serial.available())
 }
 
 
+
+
 void lis_analog() {
+
+    digitalWrite(SOIL_EN, HIGH);
+    delay(100);
     for(uint8_t pin=0;pin<ANALOG_PINS;pin++) {
         analog[pin] = analogRead(pin);
         delay(10);
@@ -406,6 +457,7 @@ void lis_analog() {
         lis_cmd();
         delay(1);
     }
+    digitalWrite(SOIL_EN, LOW);
 }
 
 boolean red = false;
