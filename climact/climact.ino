@@ -11,6 +11,8 @@
 
 #define DEBUG 1
 
+#define COND_NR 8
+uint32_t result;
 
 #define TEMP1_CAL -0.5
  // *********************************************
@@ -45,6 +47,7 @@ DS1302 rtc(kCePin, kIoPin, kSclkPin);
 #define O_MOI1 6
 #define O_MOI2 7
 #define O_PWR  8
+#define O_NOW  9
 
 
 #define SOIL_EN 10
@@ -62,7 +65,6 @@ DHT dht,dht2;
 
 //DHT dht2(6,DHT11);
 
-uint8_t flags = 0;
 uint8_t modes = 0;
 uint8_t modes2 = 0;
 
@@ -154,15 +156,21 @@ void setup() {
     digitalWrite(relay_pins[r], HIGH);
   }
 
-  digitalWrite(relay_pins[0],LOW);
-  delay(3000);
-  digitalWrite(relay_pins[0],HIGH);
-
+/*
+  for(uint8_t r=0;r<sizeof(relay_pins);r++) {
+  digitalWrite(relay_pins[r],LOW);
+  delay(1000);
+  digitalWrite(relay_pins[r],HIGH);
+  }
+*/
   Serial.print("Hello i'm Perceptor v0.1\n");
+  /*
   open_gardena_solenoid();
   delay(1000);
   close_gardena_solenoid();
+  */
 
+//    evaluate();
 }
 
 char buffer [32];
@@ -175,6 +183,8 @@ uint8_t ctoi(char c) {
         return c - '0';
     } else if ((c>='A') && (c<='F')){
         return 10 + (c - 'A');
+    } else if ((c>='a') && (c<='f')){
+        return 10 + (c - 'a');
     } else {
         return 0;
     }
@@ -287,6 +297,7 @@ uint32_t t;
                 set_rtc(t);
                 Serial.print("U=");
                 Serial.print(t);
+                Serial.print("\n");
                 break;
             default:
                  Serial.print("NAK:");
@@ -322,6 +333,14 @@ uint32_t t;
                  Serial.print((uint32_t)now());
                  Serial.print("\n");
                  break;
+            case 'E':
+                 Serial.print("E=");
+                 for (uint8_t iter=0;iter<COND_NR;iter++) {
+                    Serial.print((result >> iter) & 1);
+                 }
+                 Serial.print("\n");
+                 break;
+
             default:
                  Serial.print("NAK:");
                  Serial.print(key[0]);
@@ -494,6 +513,7 @@ void loop() {
     else {
         synced = false;
     }
+    evaluate();
 
     //lis_capteur();
 }
@@ -513,20 +533,22 @@ void loop() {
 
 struct condition_leaf {
  uint8_t flags;
- int8_t left;
- int16_t right;
+ uint8_t left;
+ int32_t res;
+ int32_t right;
 };
 
 struct condition_node {
  uint8_t flags;
- int8_t left;
- int16_t right;
+ uint8_t left;
+ int32_t res;
+ int32_t right;
 };
 
 
 struct condition_leaf_mod {
  uint8_t flags;
- int8_t left;
+ uint8_t left;
  uint32_t modulo; // Use case above 86400 ?
  int32_t right;
 };
@@ -538,21 +560,88 @@ union condition {
     uint8_t data[sizeof( struct condition_leaf_mod)];
 }; 
 
-#define COND_NR 32
 #define START_ADDR 128
 
 condition cond;
 
+int32_t get_operand(uint8_t op) {
+  switch (op)
+        {
+            case O_NOW:
+                return (int32_t) now();
+        }
+  return -1;
+}
+
+uint32_t booloperate(uint8_t flags, int32_t left, int32_t right) {
+    /*
+        Serial.print('\n');
+        Serial.print("op");
+        Serial.print(' ');
+        Serial.print(flags);
+        Serial.print(' ');
+        Serial.print(left);
+        Serial.print(' ');
+        Serial.print(right);
+        Serial.print('\n');
+        */
+    if ((flags & COND_LT)!=0) {
+       // digitalWrite(3,LOW);
+        return left < right ? 1:0;
+
+    }
+    else if ((flags & COND_BT)!=0) {
+        return left > right ? 1:0;
+    }
+    else if ((flags & COND_AND) !=0) {
+        return (result & (1 << left)) && (result & (1 << right)) ? 1:0;
+    }
+    else if ((flags & COND_OR) !=0) {
+        return (result & (1 << left)) || (result & (1 << right)) ? 1:0;
+    }
+    else {
+        return 0;
+    }
+//        Serial.print('\n');
+}
+
+
 void evaluate() {
+    result = 0;
     for(uint8_t k=0;k<COND_NR;k++) {
         uint8_t l;
         for(l=0;l<sizeof(condition);l++) {
             cond.data[l] = EEPROM.read(START_ADDR + (k*sizeof(condition)) + l);
         }
+/*
+        Serial.print(k);
+        Serial.print(' ');
+        Serial.print(START_ADDR + (k*sizeof(condition)));
+        Serial.print(' ');
+        Serial.print(cond.leaf.flags);
+        Serial.print(' ');
+        Serial.print(cond.leaf_mod.left);
+        Serial.print(' ');
+        Serial.print(cond.leaf_mod.modulo);
+        Serial.print(' ');
+        Serial.print(cond.leaf_mod.right);
+        Serial.print(' ');
+        */
         if ((cond.leaf.flags  & COND_MOD) != 0){
+            int32_t op = get_operand(cond.leaf_mod.left);
+            result |= booloperate(cond.leaf.flags, op % cond.leaf_mod.modulo, cond.leaf_mod.right) << k;
         } else if ((cond.leaf.flags  & (COND_AND|COND_OR)) != 0){
+            result |= booloperate(cond.leaf.flags, cond.node.left, cond.node.right) << k;
         } else if ((cond.leaf.flags  & (COND_LT|COND_BT)) != 0){
         }
     }
+
+    if(((result >>2)&1)!=0) {
+        digitalWrite(3,LOW);
+            }
+            else {
+        digitalWrite(3,HIGH);
+            }
+
 }
 
