@@ -9,11 +9,16 @@
 #include <Time.h>
 #include <math.h>
 
-#define DEBUG 1
+//#define DEBUG_RULES 1
+//#define DEBUG_SENSORS 1
+//#define DEBUG_ACT 1
+//#define DEBUG_FAST 1
+//#define DEBUG_RULES 1
 //#define DEBUG_RULES 1
 
 #define COND_NR 16
 uint32_t result;
+time_t right_now;
 
 #define TEMP1_CAL -0.5
  // *********************************************
@@ -72,7 +77,12 @@ DHT dht,dht2;
 #define TYPE_HUM_UP   1 << 4   // Device ups humidity level
 #define TYPE_HUM_DOWN   1 << 5   // Device downs humidity level
 
+
+#ifdef DEBUG_FAST
+#define TYPE_WAIT_SECS 1 // min. time between state change
+#else
 #define TYPE_WAIT_SECS 1200 // min. time between state change
+#endif
 
 struct relay {
    uint8_t pin;
@@ -254,6 +264,16 @@ void set_rtc(time_t t) {
 }
 
 
+char _result_str[COND_NR+1];
+char * result_str() {
+    for (uint8_t iter=0;iter<COND_NR;iter++) {
+        _result_str[iter] = ((result >> iter) & 1) ? '1':'0';
+    }
+    _result_str[COND_NR]='\0';
+    return _result_str;
+}
+
+
 
 boolean ParseLine()
 {
@@ -377,9 +397,7 @@ uint32_t t;
                  break;
             case 'E':
                  Serial.print("E=");
-                 for (uint8_t iter=0;iter<COND_NR;iter++) {
-                    Serial.print((result >> iter) & 1);
-                 }
+                 Serial.print(result_str());
                  Serial.print("\n");
                  break;
 
@@ -394,6 +412,24 @@ uint32_t t;
     }
     return true;
 }
+
+
+void log_event(char *name, int32_t p1, int32_t p2, int32_t p3) {
+                 Serial.print('\n');
+                 Serial.print("EV:");
+                 Serial.print(right_now);
+                 Serial.print(",");
+                 Serial.print(name);
+                 Serial.print(",");
+                 Serial.print(result_str());
+                 Serial.print(",");
+                 Serial.print(p1);
+                 Serial.print(",");
+                 Serial.print(p2);
+                 Serial.print(",");
+                 Serial.print(p3);
+                 Serial.print('\n');
+                 }
 
 #define ROS_A 17.27
 #define ROS_B 237.7
@@ -436,7 +472,7 @@ void store_capteur_val(uint8_t nr, float val ) {
     }
 }
 
-#ifdef DEBUG
+#ifdef DEBUG_SENSORS
 int stat[3];
 int stat2[3];
 
@@ -458,19 +494,26 @@ void lis_capteur() {
       store_capteur_val(O_HUM1, dht.getHumidity());
         lis_cmd();
     store_capteur_val(O_TEMP1,dht.getTemperature() + TEMP1_CAL);
-#ifdef DEBUG
+#ifdef DEBUG_SENSORS
       stat[dht.getStatus()]++;
       print_stat(stat);
 #endif
+      if(dht.getStatus() >0){
+          log_event("sensor",0,dht.getStatus(),-1);
+      }
+
         lis_cmd();
     store_capteur_val(O_HUM2, dht2.getHumidity());
         lis_cmd();
     store_capteur_val(O_TEMP2,dht2.getTemperature());
     store_ros();
-#ifdef DEBUG
+#ifdef DEBUG_SENSORS
       stat2[dht2.getStatus()]++;
       print_stat(stat2);
 #endif
+      if(dht.getStatus() >0){
+          log_event("sensor",0,dht.getStatus(),-1);
+      }
         lis_cmd();
 }
 
@@ -609,13 +652,16 @@ union condition {
 
 condition cond;
 
-time_t right_now;
 
 int32_t get_operand(uint8_t op) {
   switch (op)
         {
             case O_NOW:
+#ifdef DEBUG_FAST
+                return (int32_t) right_now*(86400/60);  // Plays 1 day in 1 minute. Caution: no lamp protection in this mode, unplug them first !
+#else
                 return (int32_t) right_now;
+#endif
         }
   return -1;
 }
@@ -710,7 +756,6 @@ void evaluate() {
     }
 }
 
-
 void actuate_relays() {
   for(uint8_t i=0;i<sizeof(relay_pins);i++) {
      relay *r = &relays[i].r;
@@ -742,29 +787,21 @@ void actuate_relays() {
          if (r->state != new_state) {
              if(((r->type& TYPE_WAIT) == 0) || (r->lastchange < now() - TYPE_WAIT_SECS) ) {
                  right_now = now();
-                 digitalWrite(r->pin,r->state?LOW:HIGH);
-
-                 Serial.print("EV:");
-                 Serial.print(right_now);
-                 Serial.print(",relay,");
-                 Serial.print(r->state);
-
-                 Serial.print(",");
-                 Serial.print(new_state);
-                 Serial.print(",");
-                 Serial.print(right_now - r->lastchange);
-                 Serial.print('\n');
-
+                 
+                 log_event("relay",r->state,new_state,right_now - r->lastchange) ;
                  r->state = new_state;
+                 digitalWrite(r->pin,r->state?LOW:HIGH);
                  r->lastchange = right_now;
 
                  if ((r->type& TYPE_WAIT) != 0) {
                      int adress = RELAY_ADDR + i * sizeof(relay);
+#ifndef DEBUG_FAST
                      EEPROM.update (adress + 1, relays[i].d[1]);
                      EEPROM.update (adress + 4, relays[i].d[4]);
                      EEPROM.update (adress + 5, relays[i].d[5]);
                      EEPROM.update (adress + 6, relays[i].d[6]);
                      EEPROM.update (adress + 7, relays[i].d[7]);
+#endif
                  }
              }
         }

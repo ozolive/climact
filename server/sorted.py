@@ -7,8 +7,9 @@ import os.path
 import struct
 
 filename = 'climate_log.csv'
+event_log = 'event_log.csv'
 
-interval_secs = 18
+interval_secs = 180
 
 BAUD_RATE=9600
 #BAUD_RATE=115200
@@ -64,7 +65,7 @@ open_port()
 #print 'Enter your commands below.\r\nInsert "exit" to leave the application.'
 
 
-fields = ['t1','h1','t2','h2','r1','r2','a0','a1','a2','a3','time','U']
+fields = ['t1','h1','t2','h2','r1','r2','a0','a1','a2','a3','time','U','a4','a5']
 current = {}
 
 
@@ -76,11 +77,15 @@ def get_reply():
         while ser.inWaiting() > 0:
             c = ser.read(1)
             if c == "\n":
+              outbuff = outbuff.replace("\n","") 
               if outbuff != '':
                 #print "Got line: ",outbuff
                 if not ('=' in outbuff):
                     if outbuff !='':
-                       print outbuff
+                      #  thatar = outbuff.split(':')
+                        if 'EV:' in outbuff:
+                            write_ev(event_log,outbuff.replace('EV:',''))
+                        print outbuff
                 for it in outbuff.split(","):
                     if (it !='') and ('=' in it):
                         print it;
@@ -101,6 +106,10 @@ def get_reply():
         print "Reading", outbuff
         print "ERROR", "IO",e
         reset_port()
+    except OSError as e:
+        print "Reading", outbuff
+        print "ERROR", "OS",e
+        reset_port()
 
 
 input=1
@@ -109,10 +118,10 @@ input=1
 def write_csv(fname):
     
     if os.path.isfile(fname):
-        fd = open("climate_log.csv", "ab")
+        fd = open(fname, "ab")
         cli = csv.writer(fd)
     else:
-        fd = open("climate_log.csv", "wb")
+        fd = open(fname, "wb")
         cli = csv.writer(fd)
         cli.writerow(fields)
 
@@ -126,8 +135,16 @@ def write_csv(fname):
     cli.writerow(out)
     fd.close()
 
-
-
+def write_ev(fname,outstr):
+#    print "Writing", outstr,"To",fname
+    
+    if os.path.isfile(fname):
+        fd = open(fname, "ab")
+    else:
+        fd = open(fname, "wb")
+        fd.write("time,rules_result,type,p1,p2,p3\n")
+    fd.write(outstr + "\n")
+    fd.close()
 
 O_TEMP1 = 0
 O_TEMP2 = 1
