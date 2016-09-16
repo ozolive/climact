@@ -10,8 +10,9 @@
 #include <math.h>
 
 #define DEBUG 1
+//#define DEBUG_RULES 1
 
-#define COND_NR 8
+#define COND_NR 16
 uint32_t result;
 
 #define TEMP1_CAL -0.5
@@ -38,6 +39,8 @@ int analog[ANALOG_PINS];
 // Create a DS1302 object.
 DS1302 rtc(kCePin, kIoPin, kSclkPin);
 
+DHT dht,dht2;
+
 #define O_TEMP1 0
 #define O_TEMP2 1
 #define O_HUM1 2
@@ -49,7 +52,6 @@ DS1302 rtc(kCePin, kIoPin, kSclkPin);
 #define O_PWR  8
 #define O_NOW  9
 
-
 #define SOIL_EN 10
 
 #define HBRIDGE_2 11
@@ -60,25 +62,32 @@ DS1302 rtc(kCePin, kIoPin, kSclkPin);
 #define DHTPIN 8
 #define DHT2PIN 9
 
-//dht DHT;
-DHT dht,dht2;
+#define RELAY_ADDR 64
 
-//DHT dht2(6,DHT11);
 
-uint8_t modes = 0;
-uint8_t modes2 = 0;
+#define TYPE_LIGHT  1 << 0
+#define TYPE_WAIT   1 << 1   // Device needs 30 min. wait between state change, e.g. HPS
+#define TYPE_TEMP_UP   1 << 2   // Device warms the place
+#define TYPE_TEMP_DOWN   1 << 3   // Device cools the place
+#define TYPE_HUM_UP   1 << 4   // Device ups humidity level
+#define TYPE_HUM_DOWN   1 << 5   // Device downs humidity level
 
-struct timer {
+#define TYPE_WAIT_SECS 1200 // min. time between state change
+
+struct relay {
    uint8_t pin;
+   uint8_t state;
    uint8_t type;
-   uint8_t heure_debut;
-   uint8_t minute_debut;
-   uint8_t heure_fin;
-   uint8_t minute_fin;
-   uint8_t temp_u;
-   uint8_t temp_d;
-   float   temp1;
+   int8_t rule;
+   time_t lastchange;
 };
+
+union relay_store {
+    struct relay r;
+    uint8_t d[sizeof(struct relay)];
+    }
+
+relays[2];
 
 struct sensor_state_d {
    float temp1;
@@ -119,6 +128,37 @@ void close_gardena_solenoid(){
 }
 
 
+void read_relay_conf(){
+
+  for(uint8_t r=0;r<sizeof(relay_pins);r++) {
+    pinMode(relay_pins[r], OUTPUT); // 
+    for(uint8_t l=0;l<sizeof(relay_store);l++) {
+            relays[r].d[l] = EEPROM.read(RELAY_ADDR + (r*sizeof(relay_store)) + l);
+    }
+    relays[r].r.pin=relay_pins[r];
+#ifdef DEBUG_CONF
+    Serial.print("relay ");
+    Serial.print(r);
+    Serial.print(" pin ");
+    Serial.print(relays[r].r.pin);
+    Serial.print(" type ");
+    Serial.print(relays[r].r.type);
+    Serial.print(" state ");
+    Serial.print(relays[r].r.state);
+    Serial.print(" rule ");
+    Serial.print(relays[r].r.rule);
+    Serial.print(" lastchange ");
+    Serial.print(relays[r].r.lastchange);
+    Serial.print('\n');
+#endif
+    
+    digitalWrite(relay_pins[r], relays[r].r.state ? LOW:HIGH);
+
+  }
+
+
+}
+
 
 void setup() {
   //Serial.begin(115200);
@@ -151,11 +191,6 @@ void setup() {
   Time t = rtc.time();
   setTime(t.hr, t.min, t.sec, t.date, t.mon, t.yr);
 
-  for(uint8_t r=0;r<sizeof(relay_pins);r++) {
-    pinMode(relay_pins[r], OUTPUT); // 
-    digitalWrite(relay_pins[r], HIGH);
-  }
-
 /*
   for(uint8_t r=0;r<sizeof(relay_pins);r++) {
   digitalWrite(relay_pins[r],LOW);
@@ -169,6 +204,8 @@ void setup() {
   delay(1000);
   close_gardena_solenoid();
   */
+
+  read_relay_conf();
 
 //    evaluate();
 }
@@ -270,6 +307,10 @@ uint32_t t;
                 uint8_t c;
                 c=0;
                 address = ctoi(value[0]) * 16 * 16 + ctoi(value[1]) * 16 + ctoi(value[2]);
+
+                Serial.print("address ");
+                Serial.print(address);
+                    Serial.print("\n");
                 value +=3;
                 if(is_write) {
                     while((value[0] != '\n') && (value[0]!='\0') && (value[1] != '\n') && (value[1]!='\0')){
@@ -278,6 +319,7 @@ uint32_t t;
                         value+=2;
                         c++;
                     }
+                    read_relay_conf();
                 } else {
                     c=32;
                     address += c;
@@ -285,7 +327,7 @@ uint32_t t;
 
                 Serial.print(is_write ? "W" : "R");
                 Serial.print("=");
-                Serial.print(address);
+                Serial.print(address-c);
                 for (uint8_t m=0;m<c;m++){
                     print_uint8 (EEPROM.read((address -c)+m));
                 }
@@ -469,6 +511,7 @@ void lis_analog() {
 
     digitalWrite(SOIL_EN, HIGH);
     delay(100);
+    lis_cmd();
     for(uint8_t pin=0;pin<ANALOG_PINS;pin++) {
         analog[pin] = analogRead(pin);
         delay(10);
@@ -490,9 +533,9 @@ void loop() {
     if(((period==0) and not red) or first){
         if(first) {
             lis_analog();
-            delay (2000);
+            delay (600);
             lis_capteur();
-            delay (2000);
+            delay (600);
             first=false;
         }
         else{
@@ -514,6 +557,8 @@ void loop() {
         synced = false;
     }
     evaluate();
+    actuate_relays();
+    delay(100);
 
     //lis_capteur();
 }
@@ -525,8 +570,8 @@ void loop() {
 #define COND_AND (1<<2) // Logical And        -- then both ops are  other conditions ?
 #define COND_OR (1<<3) // Logical Or
 #define COND_T2 (1<<4) // Is type 2 ?
-#define COND_MOD (1<<4) // Is modulo ?
-#define COND_LV (1<<6) // Left operand is a var (est-ce toujours le cas ?)
+#define COND_MOD (1<<5) // Is modulo ?
+#define COND_NOT (1<<6) // Invert result
 #define COND_RV (1<<7) // Right operand is a var
 
 
@@ -564,17 +609,19 @@ union condition {
 
 condition cond;
 
+time_t right_now;
+
 int32_t get_operand(uint8_t op) {
   switch (op)
         {
             case O_NOW:
-                return (int32_t) now();
+                return (int32_t) right_now;
         }
   return -1;
 }
 
 uint32_t booloperate(uint8_t flags, int32_t left, int32_t right) {
-    /*
+#ifdef DEBUG_RULES
         Serial.print('\n');
         Serial.print("op");
         Serial.print(' ');
@@ -584,36 +631,52 @@ uint32_t booloperate(uint8_t flags, int32_t left, int32_t right) {
         Serial.print(' ');
         Serial.print(right);
         Serial.print('\n');
-        */
+        delay(300);
+#endif
+    uint32_t rtrue, rfalse;
+    if ((flags & COND_NOT)!=0) {
+        rtrue = 0;
+        rfalse = 1;
+    } else {
+        rtrue = 1;
+        rfalse = 0;
+    }
     if ((flags & COND_LT)!=0) {
        // digitalWrite(3,LOW);
-        return left < right ? 1:0;
+        return (left < right) ? rtrue:rfalse;
 
     }
     else if ((flags & COND_BT)!=0) {
-        return left > right ? 1:0;
+        return (left > right) ? rtrue:rfalse;
     }
     else if ((flags & COND_AND) !=0) {
-        return (result & (1 << left)) && (result & (1 << right)) ? 1:0;
+#ifdef DEBUG_RULES
+        Serial.print("l ");
+        Serial.print(result & (1 << left));
+        Serial.print(" r ");
+        Serial.print(result & (1 << right));
+        Serial.print('\n');
+#endif
+        return ((result & (1 << left)) !=0) && ((result & (1 << right)) != 0) ? rtrue:rfalse;
     }
     else if ((flags & COND_OR) !=0) {
-        return (result & (1 << left)) || (result & (1 << right)) ? 1:0;
+        return ((result & (1 << left)) != 0) || ((result & (1 << right)) != 0) ? rtrue:rfalse;
     }
     else {
         return 0;
     }
-//        Serial.print('\n');
 }
 
 
 void evaluate() {
     result = 0;
+    right_now = now();
     for(uint8_t k=0;k<COND_NR;k++) {
         uint8_t l;
         for(l=0;l<sizeof(condition);l++) {
             cond.data[l] = EEPROM.read(START_ADDR + (k*sizeof(condition)) + l);
         }
-/*
+#ifdef DEBUG_RULES
         Serial.print(k);
         Serial.print(' ');
         Serial.print(START_ADDR + (k*sizeof(condition)));
@@ -624,24 +687,87 @@ void evaluate() {
         Serial.print(' ');
         Serial.print(cond.leaf_mod.modulo);
         Serial.print(' ');
-        Serial.print(cond.leaf_mod.right);
+        Serial.print(cond.node.right);
         Serial.print(' ');
-        */
+        Serial.print(right_now);
+        Serial.print(' ');
+#endif
         if ((cond.leaf.flags  & COND_MOD) != 0){
             int32_t op = get_operand(cond.leaf_mod.left);
             result |= booloperate(cond.leaf.flags, op % cond.leaf_mod.modulo, cond.leaf_mod.right) << k;
         } else if ((cond.leaf.flags  & (COND_AND|COND_OR)) != 0){
             result |= booloperate(cond.leaf.flags, cond.node.left, cond.node.right) << k;
         } else if ((cond.leaf.flags  & (COND_LT|COND_BT)) != 0){
+            int32_t op = get_operand(cond.leaf_mod.left);
+            result |= booloperate(cond.leaf.flags, op, cond.leaf_mod.right) << k;
         }
+#ifdef DEBUG_RULES
+                 for (uint8_t iter=0;iter<COND_NR;iter++) {
+                    Serial.print((result >> iter) & 1);
+                 }
+        Serial.print('\n');
+#endif
     }
-
-    if(((result >>2)&1)!=0) {
-        digitalWrite(3,LOW);
-            }
-            else {
-        digitalWrite(3,HIGH);
-            }
-
 }
 
+
+void actuate_relays() {
+  for(uint8_t i=0;i<sizeof(relay_pins);i++) {
+     relay *r = &relays[i].r;
+
+#ifdef DEBUG_ACT
+     delay(200);
+     Serial.print("E");
+                 for (uint8_t iter=0;iter<COND_NR;iter++) {
+                    Serial.print((result >> iter) & 1);
+                 }
+
+
+             Serial.print(" r ");
+             Serial.print(i);
+             Serial.print(" ru ");
+             Serial.print(r->rule);
+             Serial.print('\n');
+#endif
+     if(r->rule>=0){
+
+         uint8_t new_state = ((result & (1<< r->rule))!=0) ? 1:0;
+#ifdef DEBUG_ACT
+             Serial.print(" st ");
+             Serial.print(r->state);
+             Serial.print(" new ");
+             Serial.print(new_state);
+             Serial.print('\n');
+#endif
+         if (r->state != new_state) {
+             if(((r->type& TYPE_WAIT) == 0) || (r->lastchange < now() - TYPE_WAIT_SECS) ) {
+                 right_now = now();
+                 digitalWrite(r->pin,r->state?LOW:HIGH);
+
+                 Serial.print("EV:");
+                 Serial.print(right_now);
+                 Serial.print(",relay,");
+                 Serial.print(r->state);
+
+                 Serial.print(",");
+                 Serial.print(new_state);
+                 Serial.print(",");
+                 Serial.print(right_now - r->lastchange);
+                 Serial.print('\n');
+
+                 r->state = new_state;
+                 r->lastchange = right_now;
+
+                 if ((r->type& TYPE_WAIT) != 0) {
+                     int adress = RELAY_ADDR + i * sizeof(relay);
+                     EEPROM.update (adress + 1, relays[i].d[1]);
+                     EEPROM.update (adress + 4, relays[i].d[4]);
+                     EEPROM.update (adress + 5, relays[i].d[5]);
+                     EEPROM.update (adress + 6, relays[i].d[6]);
+                     EEPROM.update (adress + 7, relays[i].d[7]);
+                 }
+             }
+        }
+     }
+  }
+}
