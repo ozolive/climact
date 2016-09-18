@@ -6,7 +6,8 @@ import csv
 import os.path
 import struct
 
-filename = 'climate_log.csv'
+filename = 'climate_log_old.csv'
+climate_log = 'climate_log.csv'
 event_log = 'event_log.csv'
 
 interval_secs = 180
@@ -39,7 +40,9 @@ def open_port():
         pass
 
     if ser.isOpen():   
-        ser.setDTR(False)
+#        ser.setDTR(False)
+#        time.sleep(2)
+#        ser.setDTR(True)
         while(ser.inWaiting() > 0):
             junk = ser.read(1)
         return True
@@ -80,26 +83,28 @@ def get_reply():
               outbuff = outbuff.replace("\n","") 
               if outbuff != '':
                 #print "Got line: ",outbuff
-                if not ('=' in outbuff):
-                    if outbuff !='':
+#                if not ('=' in outbuff):
+ #                   if outbuff !='':
                       #  thatar = outbuff.split(':')
                         if 'EV:' in outbuff:
                             write_ev(event_log,outbuff.replace('EV:',''))
-                        print outbuff
-                for it in outbuff.split(","):
-                    if (it !='') and ('=' in it):
-                        print it;
-                        try:
-                            (key,val)=it.split('=')
-                            if key in fields:
-                                current[key] = val
-                            if key in ['W','R','U']:
-                                #print outbuff
-                                pass
-                        except ValueError:
-                            print "Erreur: recu" ,it
-                outbuff=''
-                break
+                        if 'ST:' in outbuff:
+                            write_log(climate_log,outbuff.replace('ST:',''))
+                        write_all(outbuff)
+#                for it in outbuff.split(","):
+#                    if (it !='') and ('=' in it):
+#                        print it;
+#                        try:
+#                            (key,val)=it.split('=')
+#                            if key in fields:
+#                                current[key] = val
+#                            if key in ['W','R','U']:
+#                                #print outbuff
+#                                pass
+#                        except ValueError:
+#                            print "Erreur: recu" ,it
+                        outbuff=''
+                        break
             outbuff += c
         time.sleep(16/BAUD_RATE)
     except IOError as e:
@@ -145,6 +150,28 @@ def write_ev(fname,outstr):
         fd.write("time,rules_result,type,p1,p2,p3\n")
     fd.write(outstr + "\n")
     fd.close()
+
+def write_log(fname,outstr):
+#    print "Writing", outstr,"To",fname
+    
+    if os.path.isfile(fname):
+        fd = open(fname, "ab")
+    else:
+        fd = open(fname, "wb")
+        fd.write("time,U,t1,h1,t2,h2,r1,r2,a0,a1,a2,a3,a4,a5,wt,ws,wi\n")
+    fd.write(str(int(time.time())) + ',' + outstr + "\n")
+    fd.close()
+
+
+fd_all = open('allin.log', "wb")
+def write_all(outstr):
+   global fd_all
+   fd_all.write(outstr)
+   fd_all.write('\n')
+#    print "Writing", outstr,"To",fname
+
+
+
 
 O_TEMP1 = 0
 O_TEMP2 = 1
@@ -259,6 +286,9 @@ time.sleep(2)
 get_reply()
 ser.write("U=" + str(int(time.time())) + '\n')
 time.sleep(0.2)
+get_reply()
+get_reply()
+ser.write("U=" + str(int(time.time())) + '\n')
 #blank_rules()
 #write_rules()
 #write_relay(make_relay(0,TYPE_LIGHT|TYPE_WAIT|TYPE_TEMP_UP,7,0))
@@ -273,30 +303,40 @@ while 1 :
         get_reply()
         # send the character to the device
         if(starttime<time.time()):
+
+            get_reply()
+            ser.write("U=" + str(int(time.time())) + '\n')
+            time.sleep(0.2)
+            get_reply()
+            get_reply()
+            ser.write("P=0"+'\n')
+            time.sleep(0.2)
+            get_reply()
+            get_reply()
             current = {}
-            ser.write("s" + '\n')
-            time.sleep(0.1)
-            get_reply()
-            ser.write("t" + '\n')
-            time.sleep(0.1)
-            get_reply()
-            for i in range(0, 6):
-               ser.write("a="+str(i) + '\n')
-               time.sleep(0.1)
-               get_reply()
-            # let's wait one second before reading output (let's give device time to answer)
-            time.sleep(0.1)
-            current['time']=int(starttime)
+#            ser.write("s" + '\n')
+#            time.sleep(0.1)
+#            get_reply()
+#            ser.write("t" + '\n')
+#            time.sleep(0.1)
+#            get_reply()
+#            for i in range(0, 6):
+#               ser.write("a="+str(i) + '\n')
+#               time.sleep(0.1)
+#               get_reply()
+#            # let's wait one second before reading output (let's give device time to answer)
+#            time.sleep(0.1)
+#            current['time']=int(starttime)
             print time.time() - starttime
             starttime += interval_secs
-            ser.write("U"+ '\n')
-            time.sleep(0.1)
-            get_reply()
-            ser.write("E"+ '\n')
-            time.sleep(0.1)
-            get_reply()
-            write_csv(filename)
-       # time.sleep(starttime-time.time())
+#            ser.write("U"+ '\n')
+#            time.sleep(0.1)
+#            get_reply()
+#            ser.write("E"+ '\n')
+#            time.sleep(0.1)
+#            get_reply()
+#            write_csv(filename)
+#       # time.sleep(starttime-time.time())
         time.sleep(0.1)
         get_reply()
 

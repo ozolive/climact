@@ -34,6 +34,12 @@ const int kCePin   = 5;  // Chip Enable
 const int kIoPin   = 6;  // Input/Output
 const int kSclkPin = 7;  // Serial Clock
 
+time_t next_watering;
+int water_seconds = 0;
+int water_interval = 1800;
+float    water_total = 0;
+
+
 
 long called = 0;
 
@@ -211,13 +217,32 @@ void setup() {
   Serial.print("Hello i'm Perceptor v0.1\n");
   /*
   open_gardena_solenoid();
-  delay(1000);
+  delay(2000);
   close_gardena_solenoid();
   */
 
   read_relay_conf();
 
 //    evaluate();
+}
+
+void irrigate() {
+    int32_t microsecs = water_seconds;
+    if (microsecs < 20) {
+        microsecs = microsecs * 1000;
+    }
+    if (microsecs > 20000) {
+        microsecs = 20000;
+    }
+    if(microsecs > 0) {
+        open_gardena_solenoid();
+        water_total = water_total + (microsecs / 1000);
+        while (microsecs>0) {
+            delay(100);
+            microsecs = microsecs - 100;
+        }
+        close_gardena_solenoid();
+    }
 }
 
 char buffer [32];
@@ -360,6 +385,12 @@ uint32_t t;
                 Serial.print("U=");
                 Serial.print(t);
                 Serial.print("\n");
+                break;
+            case 'P':
+                if((val>=0) && (val < 20)) {
+                    water_seconds = val;
+                    out_stat();
+                }
                 break;
             default:
                  Serial.print("NAK:");
@@ -511,8 +542,8 @@ void lis_capteur() {
       stat2[dht2.getStatus()]++;
       print_stat(stat2);
 #endif
-      if(dht.getStatus() >0){
-          log_event("sensor",0,dht.getStatus(),-1);
+      if(dht2.getStatus() >0){
+          log_event("sensor",0,dht2.getStatus(),-1);
       }
         lis_cmd();
 }
@@ -568,6 +599,46 @@ void lis_analog() {
 boolean red = false;
 boolean synced = false;
 
+void out_stat(){
+     Serial.print("ST:");
+     Serial.print (right_now);
+     Serial.print (',');
+     Serial.print(state[0].d[O_TEMP1]);
+     Serial.print(',');
+     Serial.print(state[0].s.hum1);
+     Serial.print(',');
+     delay(100);
+     Serial.print(state[0].s.temp2);
+     Serial.print(',');
+     Serial.print(state[0].s.hum2);
+     Serial.print(',');
+     Serial.print(state[0].s.ros1);
+     Serial.print(',');
+     delay(100);
+     Serial.print(state[0].s.ros2);
+     Serial.print(',');
+     Serial.print(analog[0]);
+     Serial.print(',');
+     Serial.print(analog[1]);
+     Serial.print(',');
+     delay(100);
+     Serial.print(analog[2]);
+     Serial.print(',');
+     Serial.print(analog[3]);
+     Serial.print(',');
+     Serial.print(analog[4]);
+     delay(100);
+     Serial.print(',');
+     Serial.print(analog[5]);
+     Serial.print(',');
+     Serial.print(water_total);
+     Serial.print(',');
+     Serial.print(water_seconds);
+     Serial.print(',');
+     Serial.print(water_interval);
+     Serial.print('\n');
+}
+
 void loop() {
    // int time = 
 
@@ -578,7 +649,7 @@ void loop() {
             lis_analog();
             delay (600);
             lis_capteur();
-            delay (600);
+            delay (1600);
             first=false;
         }
         else{
@@ -586,6 +657,9 @@ void loop() {
             lis_analog();
         }
         red = true;
+        if((called % 8)==0){
+            out_stat();
+        }
         called++;
     }
     else if((period!=0) and red) {
@@ -602,6 +676,11 @@ void loop() {
     evaluate();
     actuate_relays();
     delay(100);
+
+    if((right_now > next_watering) && (relays[1].r.state == 0)) {
+        irrigate();
+        next_watering = right_now + water_interval;
+    }
 
     //lis_capteur();
 }
@@ -788,7 +867,7 @@ void actuate_relays() {
              if(((r->type& TYPE_WAIT) == 0) || (r->lastchange < now() - TYPE_WAIT_SECS) ) {
                  right_now = now();
                  
-                 log_event("relay",r->state,new_state,right_now - r->lastchange) ;
+                 log_event("relay",r->pin,new_state,right_now - r->lastchange) ;
                  r->state = new_state;
                  digitalWrite(r->pin,r->state?LOW:HIGH);
                  r->lastchange = right_now;
@@ -803,6 +882,7 @@ void actuate_relays() {
                      EEPROM.update (adress + 7, relays[i].d[7]);
 #endif
                  }
+                 delay(1000);
              }
         }
      }
