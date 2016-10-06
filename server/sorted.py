@@ -63,10 +63,6 @@ def reset_port():
 
     
 open_port()
-#ser.isOpen()
-
-#print 'Enter your commands below.\r\nInsert "exit" to leave the application.'
-
 
 fields = ['t1','h1','t2','h2','r1','r2','a0','a1','a2','a3','time','U','a4','a5']
 current = {}
@@ -82,7 +78,7 @@ def get_reply():
             if c == "\n":
               outbuff = outbuff.replace("\n","") 
               if outbuff != '':
-                #print "Got line: ",outbuff
+                        print "Got line: ",outbuff
 #                if not ('=' in outbuff):
  #                   if outbuff !='':
                       #  thatar = outbuff.split(':')
@@ -172,132 +168,6 @@ def write_all(outstr):
 
 
 
-
-O_TEMP1 = 0
-O_TEMP2 = 1
-O_HUM1 = 2
-O_HUM2 = 3
-O_ROS1 = 4
-O_ROS2 = 5
-O_MOI1 = 6
-O_MOI2 = 7
-O_PWR = 8
-O_NOW = 9
-
-
-
-COND_LT = (1<<0) # Lower than
-COND_BT = (1<<1) # Bigger than than
-COND_AND = (1<<2) # Logical And        -- then both ops are  other conditions ?
-COND_OR = (1<<3) # Logical Or
-COND_T2 = (1<<4) # Is type 2 ?
-COND_MOD = (1<<5) # Is modulo ?
-COND_NOT = (1<<6) # Inverse conditin
-COND_RV = (1<<7) # Right operand is a var
-
-
-TYPE_LIGHT = 1 << 0
-TYPE_WAIT  = 1 << 1   #// Device needs 30 min. wait between state change, e.g. HPS
-TYPE_TEMP_UP  = 1 << 2   #// Device warms the place
-TYPE_TEMP_DOWN =  1 << 3   #// Device cools the place
-TYPE_HUM_UP  = 1 << 4   #// Device ups humidity level
-TYPE_HUM_DOWN =  1 << 5   #// Device downs humidity level
-
-rules_count=0;
-start_adress = 128;
-relay_adress = 64;
-
-def swap32(i):
-    return struct.unpack("<I", struct.pack(">I", i))[0]
-
-def make_relay(state,t,rule,lastchange):
-   return "%02x%02x%02x%02x%08x" % (0,state,t,rule,swap32(lastchange))
-
-def write_relay(relay):
-   global relay_adress
-   ser.write("W=%03x%s" % (relay_adress, relay)+ '\n')
-   print "WR=%03x%s" % (relay_adress, relay)+ '\n'
-   relay_adress += len(relay)/2
-   time.sleep(0.1)
-   get_reply()
-
-
-def make_rule(flags,left, right, mod=0):
-   global rules_count
-   sf = "%02x%02x%08x%08x" % (flags,left,swap32(mod),swap32(right))
-   rules_count += 1;
-   return sf
-
-def write_rule(rule):
-   global start_adress
-   ser.write("W=%03x%s" % (start_adress, rule)+ '\n')
-   print "WR=%03x%s" % (start_adress, rule)+ '\n'
-   start_adress += len(rule)/2
-   time.sleep(0.1)
-   get_reply()
-   get_reply()
-
-def write_rules():
-    time.sleep(5)
-    write_rule(make_rule(COND_BT|COND_MOD,O_NOW,3600*4,86400)) # 0
-    write_rule(make_rule(COND_LT|COND_MOD,O_NOW,3600*16,86400)) # 1
-    write_rule(make_rule(COND_AND,0,1))               # 2
-    write_rule(make_rule(COND_BT|COND_MOD,O_NOW,3600,3600*3)) # 3
-    write_rule(make_rule(COND_LT|COND_MOD,O_NOW,3600+1800,3600*3)) # 4
-    write_rule(make_rule(COND_AND,3,4))               # 5
-    write_rule(make_rule(COND_NOT|COND_AND,3,4))               # 6
-    write_rule(make_rule(COND_AND,2,5))               # 7
-    write_rule(make_rule(COND_AND,2,6))               # 8
-#E=1111100100000000
-    for i in range(0, 7):
-        write_rule(make_rule(0,0,0))
-
-    print "Wrote ",rules_count,"rules."
-
-
-def blank_rules():
-    time.sleep(5)
-    for i in range(0, 8):
-       write_rule('FFFFFFFFFFFF')
-
-
-#ser.write("W=080AF0AF1ABI47C"+ '\n')
-#time.sleep(0.5)
-#get_reply()
-
-def read_rules():
-    ser.write("R=080"+ '\n')
-    time.sleep(0.1)
-    get_reply()
-    ser.write("R=080"+ '\n')
-    time.sleep(0.1)
-    get_reply()
-    ser.write("R=0a0"+ '\n')
-    time.sleep(0.1)
-    get_reply()
-    ser.write("R=040"+ '\n')
-    time.sleep(0.1)
-    get_reply()
-    ser.write("R=060"+ '\n')
-    time.sleep(0.1)
-    get_reply()
-
-time.sleep(2)
-get_reply()
-ser.write("U=" + str(int(time.time())) + '\n')
-time.sleep(0.2)
-get_reply()
-get_reply()
-ser.write("U=" + str(int(time.time())) + '\n')
-#blank_rules()
-#write_rules()
-#write_relay(make_relay(0,TYPE_LIGHT|TYPE_WAIT|TYPE_TEMP_UP,7,0))
-#write_relay(make_relay(0,TYPE_LIGHT|TYPE_WAIT|TYPE_TEMP_UP,8,0))
-read_rules()
-get_reply()
-
-
-
 starttime  = time.time() + 8
 while 1 :
         get_reply()
@@ -308,8 +178,9 @@ while 1 :
             ser.write("U=" + str(int(time.time())) + '\n')
             time.sleep(0.2)
             get_reply()
+            time.sleep(0.2)
             get_reply()
-            ser.write("P=0"+'\n')
+            ser.write("P=4"+'\n')
             time.sleep(0.2)
             get_reply()
             get_reply()

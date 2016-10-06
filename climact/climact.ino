@@ -14,11 +14,13 @@
 //#define DEBUG_ACT 1
 //#define DEBUG_FAST 1
 //#define DEBUG_RULES 1
-//#define DEBUG_RULES 1
+//#define DEBUG_CONF 1
 
 #define COND_NR 16
 uint32_t result;
 time_t right_now;
+
+uint8_t time_is_set = 0;
 
 #define TEMP1_CAL -0.5
  // *********************************************
@@ -29,6 +31,7 @@ time_t right_now;
 #define SAMPLING_PERIOD  5 //seconds. Minimum 2s for DHT22
 
 const uint8_t relay_pins[] = {3,4};
+uint8_t relay_conf_red = 0;
 
 const int kCePin   = 5;  // Chip Enable
 const int kIoPin   = 6;  // Input/Output
@@ -36,10 +39,12 @@ const int kSclkPin = 7;  // Serial Clock
 
 time_t next_watering;
 int water_seconds = 0;
-int water_interval = 1800;
+int water_interval = 3600;
 float    water_total = 0;
 
 
+#define BOARD_BLUEPILL 1
+//#define BOARD_ATMEGA 1
 
 long called = 0;
 
@@ -125,7 +130,6 @@ union sensor_state {
 
 sensor_state state[4];
 
-#define RELAY1  4
 
 boolean first = true;
 
@@ -145,31 +149,38 @@ void close_gardena_solenoid(){
 
 
 void read_relay_conf(){
+    if(!relay_conf_red) {
 
-  for(uint8_t r=0;r<sizeof(relay_pins);r++) {
-    pinMode(relay_pins[r], OUTPUT); // 
-    for(uint8_t l=0;l<sizeof(relay_store);l++) {
-            relays[r].d[l] = EEPROM.read(RELAY_ADDR + (r*sizeof(relay_store)) + l);
-    }
-    relays[r].r.pin=relay_pins[r];
+      for(uint8_t r=0;r<sizeof(relay_pins);r++) {
+        pinMode(relay_pins[r], OUTPUT); // 
+        for(uint8_t l=0;l<sizeof(relay_store);l++) {
+                relays[r].d[l] = EEPROM.read(RELAY_ADDR + (r*sizeof(relay_store)) + l);
+        }
+        relays[r].r.pin=relay_pins[r];
+
+        relays[r].r.state = 0;           // Avoid intempestive click on reset..
+        relays[r].r.lastchange=now();
+
 #ifdef DEBUG_CONF
-    Serial.print("relay ");
-    Serial.print(r);
-    Serial.print(" pin ");
-    Serial.print(relays[r].r.pin);
-    Serial.print(" type ");
-    Serial.print(relays[r].r.type);
-    Serial.print(" state ");
-    Serial.print(relays[r].r.state);
-    Serial.print(" rule ");
-    Serial.print(relays[r].r.rule);
-    Serial.print(" lastchange ");
-    Serial.print(relays[r].r.lastchange);
-    Serial.print('\n');
+        Serial.print("relay ");
+        Serial.print(r);
+        Serial.print(" pin ");
+        Serial.print(relays[r].r.pin);
+        Serial.print(" type ");
+        Serial.print(relays[r].r.type);
+        Serial.print(" state ");
+        Serial.print(relays[r].r.state);
+        Serial.print(" rule ");
+        Serial.print(relays[r].r.rule);
+        Serial.print(" lastchange ");
+        Serial.print(relays[r].r.lastchange);
+        Serial.print('\n');
 #endif
-    
-    digitalWrite(relay_pins[r], relays[r].r.state ? LOW:HIGH);
+        
+    //    digitalWrite(relay_pins[r], relays[r].r.state ? LOW:HIGH);
 
+      }
+    relay_conf_red=1;
   }
 
 
@@ -221,7 +232,7 @@ void setup() {
   close_gardena_solenoid();
   */
 
-  read_relay_conf();
+  relay_conf_red = 0;
 
 //    evaluate();
 }
@@ -360,10 +371,15 @@ uint32_t t;
                 if(is_write) {
                     while((value[0] != '\n') && (value[0]!='\0') && (value[1] != '\n') && (value[1]!='\0')){
                         uint8_t v = ctoi(value[0]) * 16  + ctoi(value[1]) ;
+#ifdef BOARD_ATMEGA
                         EEPROM.update(address++, v);
+#else
+                        EEPROM.write(address++, v);
+#endif
                         value+=2;
                         c++;
                     }
+                    relay_conf_red = 0;
                     read_relay_conf();
                 } else {
                     c=32;
@@ -382,8 +398,10 @@ uint32_t t;
                 t = strtoul(value,NULL,0);
                 setTime(t);
                 set_rtc(t);
+                right_now = now();
+                time_is_set = 1;
                 Serial.print("U=");
-                Serial.print(t);
+                Serial.print(now());
                 Serial.print("\n");
                 break;
             case 'P':
@@ -600,43 +618,45 @@ boolean red = false;
 boolean synced = false;
 
 void out_stat(){
-     Serial.print("ST:");
-     Serial.print (right_now);
-     Serial.print (',');
-     Serial.print(state[0].d[O_TEMP1]);
-     Serial.print(',');
-     Serial.print(state[0].s.hum1);
-     Serial.print(',');
-     delay(100);
-     Serial.print(state[0].s.temp2);
-     Serial.print(',');
-     Serial.print(state[0].s.hum2);
-     Serial.print(',');
-     Serial.print(state[0].s.ros1);
-     Serial.print(',');
-     delay(100);
-     Serial.print(state[0].s.ros2);
-     Serial.print(',');
-     Serial.print(analog[0]);
-     Serial.print(',');
-     Serial.print(analog[1]);
-     Serial.print(',');
-     delay(100);
-     Serial.print(analog[2]);
-     Serial.print(',');
-     Serial.print(analog[3]);
-     Serial.print(',');
-     Serial.print(analog[4]);
-     delay(100);
-     Serial.print(',');
-     Serial.print(analog[5]);
-     Serial.print(',');
-     Serial.print(water_total);
-     Serial.print(',');
-     Serial.print(water_seconds);
-     Serial.print(',');
-     Serial.print(water_interval);
-     Serial.print('\n');
+     if (time_is_set==1){
+         Serial.print("ST:");
+         Serial.print (right_now);
+         Serial.print (',');
+         Serial.print(state[0].d[O_TEMP1]);
+         Serial.print(',');
+         Serial.print(state[0].s.hum1);
+         Serial.print(',');
+         delay(100);
+         Serial.print(state[0].s.temp2);
+         Serial.print(',');
+         Serial.print(state[0].s.hum2);
+         Serial.print(',');
+         Serial.print(state[0].s.ros1);
+         Serial.print(',');
+         delay(100);
+         Serial.print(state[0].s.ros2);
+         Serial.print(',');
+         Serial.print(analog[0]);
+         Serial.print(',');
+         Serial.print(analog[1]);
+         Serial.print(',');
+         delay(100);
+         Serial.print(analog[2]);
+         Serial.print(',');
+         Serial.print(analog[3]);
+         Serial.print(',');
+         Serial.print(analog[4]);
+         delay(100);
+         Serial.print(',');
+         Serial.print(analog[5]);
+         Serial.print(',');
+         Serial.print(water_total);
+         Serial.print(',');
+         Serial.print(water_seconds);
+         Serial.print(',');
+         Serial.print(water_interval);
+         Serial.print('\n');
+     }
 }
 
 void loop() {
@@ -666,22 +686,36 @@ void loop() {
         red = false;
     }
     lis_cmd();
-    if((now()%3600)==0 and not synced){
-        set_rtc(now());
-        synced=true;
-    }
-    else {
-        synced = false;
-    }
-    evaluate();
-    actuate_relays();
-    delay(100);
+    if (time_is_set==1) {
+        if((now()%3600)==0 and not synced){
+            set_rtc(now());
+            synced=true;
+        }
+        else {
+            synced = false;
+        }
 
-    if((right_now > next_watering) && (relays[1].r.state == 0)) {
-        irrigate();
-        next_watering = right_now + water_interval;
-    }
+        right_now = now();
+        read_relay_conf();
+        evaluate();
+        actuate_relays();
 
+        delay(100);
+
+        if((right_now > next_watering) && (relays[1].r.state == 0)) {
+            irrigate();
+            next_watering = right_now + water_interval;
+        }
+
+        /*
+        if(((right_now % 86400) > (3600*6)) && ((right_now % 86400) < (3600*16))) {
+            digitalWrite(4,LOW);
+        } else {
+            digitalWrite(4,HIGH);
+        }
+        */
+
+    }
     //lis_capteur();
 }
 
@@ -873,16 +907,25 @@ void actuate_relays() {
                  r->lastchange = right_now;
 
                  if ((r->type& TYPE_WAIT) != 0) {
-                     int adress = RELAY_ADDR + i * sizeof(relay);
 #ifndef DEBUG_FAST
+                     int adress = RELAY_ADDR + i * sizeof(relay);
+#ifdef BOARD_ATMEGA
                      EEPROM.update (adress + 1, relays[i].d[1]);
                      EEPROM.update (adress + 4, relays[i].d[4]);
                      EEPROM.update (adress + 5, relays[i].d[5]);
                      EEPROM.update (adress + 6, relays[i].d[6]);
                      EEPROM.update (adress + 7, relays[i].d[7]);
+#else
+                     EEPROM.write (adress + 1, relays[i].d[1]);
+                     EEPROM.write (adress + 4, relays[i].d[4]);
+                     EEPROM.write (adress + 5, relays[i].d[5]);
+                     EEPROM.write (adress + 6, relays[i].d[6]);
+                     EEPROM.write (adress + 7, relays[i].d[7]);
+
+#endif
 #endif
                  }
-                 delay(1000);
+                 delay(100);
              }
         }
      }
