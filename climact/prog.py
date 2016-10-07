@@ -28,12 +28,12 @@ def open_port():
         bytesize=serial.SEVENBITS,
         timeout=1,
     )
-    ser.port = '/dev/ttyUSB1'
+    ser.port = '/dev/ttyACM12'
     try:
         ser.open()
     except serial.serialutil.SerialException:
         try:
-            ser.port='/dev/ttyUSB0'
+            ser.port='/dev/ttyACM13'
             ser.open()
         except serial.serialutil.SerialException:
             pass

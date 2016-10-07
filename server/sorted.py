@@ -28,14 +28,15 @@ def open_port():
         bytesize=serial.SEVENBITS,
         timeout=1,
     )
-    ser.port = '/dev/ttyUSB1'
+    ser.port = '/dev/ttyACM12'
     try:
         ser.open()
     except serial.serialutil.SerialException:
         try:
-            ser.port='/dev/ttyUSB0'
+            ser.port='/dev/ttyACM13'
             ser.open()
         except serial.serialutil.SerialException:
+            print "Couldn't open any serial port.."
             pass
         pass
 
@@ -45,6 +46,8 @@ def open_port():
 #        ser.setDTR(True)
         while(ser.inWaiting() > 0):
             junk = ser.read(1)
+
+        ser.write("U=" + str(int(time.time())) + '\n')
         return True
     else:
         return False

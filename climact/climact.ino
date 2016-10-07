@@ -33,29 +33,50 @@ uint8_t time_is_set = 0;
 const uint8_t relay_pins[] = {3,4};
 uint8_t relay_conf_red = 0;
 
-const int kCePin   = 5;  // Chip Enable
-const int kIoPin   = 6;  // Input/Output
-const int kSclkPin = 7;  // Serial Clock
+#ifdef ARDUINO_ARCH_AVR
+
+#define DHTPIN 8
+#define DHT2PIN 9
+
+#define HBRIDGE_2 11
+#define HBRIDGE_1 12
+
+
+
+#define kCePin    5  // Chip Enable
+#define kIoPin    6  // Input/Output
+#define kSclkPin  7  // Serial Clock
+// Create a DS1302 object.
+DS1302 rtc(kCePin, kIoPin, kSclkPin);
+
+#elif ARDUINO_ARCH_STM32F1
+
+#include <RTClock.h>
+RTClock rtc (RTCSEL_LSE);
+
+#define DHTPIN PB15
+#define DHT2PIN PB11
+
+#define HBRIDGE_2 PB8
+#define HBRIDGE_1 PB9
+
+
+#endif
 
 time_t next_watering;
 int water_seconds = 0;
 int water_interval = 3600;
-float    water_total = 0;
+float water_total = 0;
 
-
-#define BOARD_BLUEPILL 1
-//#define BOARD_ATMEGA 1
-
-long called = 0;
+long sensors_read_count = 0;
 
 #define ANALOG_PINS 6
 int analog[ANALOG_PINS];
 
 
-// Create a DS1302 object.
-DS1302 rtc(kCePin, kIoPin, kSclkPin);
 
 DHT dht,dht2;
+#define DHTTYPE DHT22
 
 #define O_TEMP1 0
 #define O_TEMP2 1
@@ -70,13 +91,7 @@ DHT dht,dht2;
 
 #define SOIL_EN 10
 
-#define HBRIDGE_2 11
-#define HBRIDGE_1 12
 
-
-#define DHTTYPE DHT22
-#define DHTPIN 8
-#define DHT2PIN 9
 
 #define RELAY_ADDR 64
 
@@ -198,11 +213,20 @@ void setup() {
 
   //  analogReadResolution(10);
 
+
+#ifdef ARDUINO_ARCH_AVR
   rtc.writeProtect(false);
   rtc.halt(false);
+  Time t = rtc.time(); // We get time from rtc
+  setTime(t.hr, t.min, t.sec, t.date, t.mon, t.yr); // And set our "system time"
 
   pinMode(13, OUTPUT); // Led set off
   digitalWrite(13, LOW);
+
+#elif ARDUINO_ARCH_STM32F1
+  
+#endif
+
 
 
   pinMode(SOIL_EN, OUTPUT); // Dont throw current to roots allthetime
@@ -215,17 +239,8 @@ void setup() {
   digitalWrite(HBRIDGE_2, LOW);
 
 
-  Time t = rtc.time();
-  setTime(t.hr, t.min, t.sec, t.date, t.mon, t.yr);
-
-/*
-  for(uint8_t r=0;r<sizeof(relay_pins);r++) {
-  digitalWrite(relay_pins[r],LOW);
-  delay(1000);
-  digitalWrite(relay_pins[r],HIGH);
-  }
-*/
   Serial.print("Hello i'm Perceptor v0.1\n");
+
   /*
   open_gardena_solenoid();
   delay(2000);
@@ -293,10 +308,15 @@ void print_uint8(uint8_t i) {
 }
 
 void set_rtc(time_t t) {
+#ifdef ARDUINO_ARCH_AVR
+
     tmElements_t tm;
     breakTime(t,tm);
     Time rt(tm.Year+1970, tm.Month, tm.Day, tm.Hour, tm.Minute, tm.Second, Time::kSunday);
     rtc.time(rt);
+#elif ARDUINO_ARCH_STM32F1
+    rtc.setTime(t);
+#endif
 }
 
 
@@ -327,24 +347,6 @@ uint32_t t;
 
         switch (toupper(key[0]))
         {
-            case 'Y':
-                rtc.year((uint16_t) 2000 + val);
-                break;
-            case 'M':
-                rtc.month(val);
-                break;
-            case 'D':
-                rtc.date(val);
-                break;
-            case 'H':
-                rtc.hour(val);
-                break;
-            case 'N':
-                rtc.minutes(val);
-                break;
-            case 'S':
-                rtc.seconds(val);
-                break;
             case 'A':
                 if ((val < ANALOG_PINS) && (val >=0)){
                     Serial.print("a");
@@ -371,7 +373,7 @@ uint32_t t;
                 if(is_write) {
                     while((value[0] != '\n') && (value[0]!='\0') && (value[1] != '\n') && (value[1]!='\0')){
                         uint8_t v = ctoi(value[0]) * 16  + ctoi(value[1]) ;
-#ifdef BOARD_ATMEGA
+#ifdef ARDUINO_ARCH_AVR
                         EEPROM.update(address++, v);
 #else
                         EEPROM.write(address++, v);
@@ -533,7 +535,7 @@ void print_stat(int *stat){
     Serial.print(" CS: ");
     Serial.print(stat[2]);
     Serial.print(" ");
-    Serial.print(called);
+    Serial.print(sensors_read_count);
     Serial.print("\n");
 
 }
@@ -615,7 +617,7 @@ void lis_analog() {
 }
 
 boolean red = false;
-boolean synced = false;
+boolean rtc_synced = false;
 
 void out_stat(){
      if (time_is_set==1){
@@ -677,23 +679,25 @@ void loop() {
             lis_analog();
         }
         red = true;
-        if((called % 8)==0){
+        if((sensors_read_count % 8)==0){
             out_stat();
         }
-        called++;
+        sensors_read_count++;
     }
     else if((period!=0) and red) {
         red = false;
     }
     lis_cmd();
     if (time_is_set==1) {
-        if((now()%3600)==0 and not synced){
+#ifdef ARDUINO_ARCH_AVR
+        if((now()%3600)==0 and not rtc_synced){
             set_rtc(now());
-            synced=true;
+            rtc_synced=true;
         }
         else {
-            synced = false;
+            rtc_synced = false;
         }
+#endif
 
         right_now = now();
         read_relay_conf();
@@ -909,7 +913,7 @@ void actuate_relays() {
                  if ((r->type& TYPE_WAIT) != 0) {
 #ifndef DEBUG_FAST
                      int adress = RELAY_ADDR + i * sizeof(relay);
-#ifdef BOARD_ATMEGA
+#ifdef ARDUINO_ARCH_AVR
                      EEPROM.update (adress + 1, relays[i].d[1]);
                      EEPROM.update (adress + 4, relays[i].d[4]);
                      EEPROM.update (adress + 5, relays[i].d[5]);
