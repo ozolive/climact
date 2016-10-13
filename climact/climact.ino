@@ -14,7 +14,7 @@
 //#define DEBUG_ACT 1
 //#define DEBUG_FAST 1
 //#define DEBUG_RULES 1
-//#define DEBUG_CONF 1
+#define DEBUG_CONF 1
 
 #define COND_NR 16
 uint32_t result;
@@ -30,13 +30,16 @@ uint8_t time_is_set = 0;
 #define HZ 100
 #define SAMPLING_PERIOD  5 //seconds. Minimum 2s for DHT22
 
-const uint8_t relay_pins[] = {3,4};
 uint8_t relay_conf_red = 0;
 
 #ifdef ARDUINO_ARCH_AVR
 
+const uint8_t relay_pins[] = {3,4};
+
 #define DHTPIN 8
 #define DHT2PIN 9
+
+#define SOIL_EN 10
 
 #define HBRIDGE_2 11
 #define HBRIDGE_1 12
@@ -54,8 +57,12 @@ DS1302 rtc(kCePin, kIoPin, kSclkPin);
 #include <RTClock.h>
 RTClock rtc (RTCSEL_LSE);
 
+const uint8_t relay_pins[] = {3,4};
+
 #define DHTPIN PB15
 #define DHT2PIN PB11
+
+#define SOIL_EN 10
 
 #define HBRIDGE_2 PB8
 #define HBRIDGE_1 PB9
@@ -89,7 +96,6 @@ DHT dht,dht2;
 #define O_PWR  8
 #define O_NOW  9
 
-#define SOIL_EN 10
 
 
 
