@@ -10,7 +10,7 @@
 #include <math.h>
 
 //#define DEBUG_RULES 1
-//#define DEBUG_SENSORS 1
+#define DEBUG_SENSORS 1
 //#define DEBUG_ACT 1
 //#define DEBUG_FAST 1
 //#define DEBUG_RULES 1
@@ -183,7 +183,7 @@ void read_relay_conf(){
         relays[r].r.lastchange=now();
 
 #ifdef DEBUG_CONF
-        Serial.print("relay ");
+        Serial.print("DBG:RELAY:Red conf for relay ");
         Serial.print(r);
         Serial.print(" pin ");
         Serial.print(relays[r].r.pin);
