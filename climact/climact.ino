@@ -10,11 +10,11 @@
 #include <math.h>
 
 //#define DEBUG_RULES 1
-#define DEBUG_SENSORS 1
+//#define DEBUG_SENSORS 1
 //#define DEBUG_ACT 1
 //#define DEBUG_FAST 1
 //#define DEBUG_RULES 1
-#define DEBUG_CONF 1
+//#define DEBUG_CONF 1
 
 #define COND_NR 16
 uint32_t result;
@@ -34,6 +34,8 @@ uint8_t relay_conf_red = 0;
 
 #ifdef ARDUINO_ARCH_AVR
 
+#define VOLTS 4.72
+
 const uint8_t relay_pins[] = {3,4};
 
 #define DHTPIN 8
@@ -44,6 +46,7 @@ const uint8_t relay_pins[] = {3,4};
 #define HBRIDGE_2 11
 #define HBRIDGE_1 12
 
+#define HALL_IN 4
 
 
 #define kCePin    5  // Chip Enable
@@ -52,10 +55,14 @@ const uint8_t relay_pins[] = {3,4};
 // Create a DS1302 object.
 DS1302 rtc(kCePin, kIoPin, kSclkPin);
 
+#define ADC_RES_BITS 10
+
 #elif ARDUINO_ARCH_STM32F1
 
 #include <RTClock.h>
 RTClock rtc (RTCSEL_LSE);
+
+#define VOLTS 3.3
 
 const uint8_t relay_pins[] = {3,4};
 
@@ -67,17 +74,28 @@ const uint8_t relay_pins[] = {3,4};
 #define HBRIDGE_2 PB8
 #define HBRIDGE_1 PB9
 
+#define HALL_IN 4
+#define ADC_RES_BITS 12
 
 #endif
 
 time_t next_watering;
-int water_seconds = 0;
-int water_interval = 3600;
+uint8_t water_seconds = 0;
+uint32_t water_interval = 3600;
+uint32_t water_limit = 60;
 float water_total = 0;
+
+
+#define AC_HZ 50
+#define HALL_SENS 185      // mV/A , 5A  acs712 hall sensor
+// #define HALL_SENS 100   // mV/A , 20A acs712 hall sensor
+// #define HALL_SENS 66    // mV/A , 30A acs712 hall sensor
+float current_amp = 0;
+int amp_filter = 2; // samples averaged as a crude low-pass
 
 long sensors_read_count = 0;
 
-#define ANALOG_PINS 6
+#define ANALOG_PINS 4
 int analog[ANALOG_PINS];
 
 
@@ -173,13 +191,15 @@ void read_relay_conf(){
     if(!relay_conf_red) {
 
       for(uint8_t r=0;r<sizeof(relay_pins);r++) {
-        pinMode(relay_pins[r], OUTPUT); // 
         for(uint8_t l=0;l<sizeof(relay_store);l++) {
                 relays[r].d[l] = EEPROM.read(RELAY_ADDR + (r*sizeof(relay_store)) + l);
         }
         relays[r].r.pin=relay_pins[r];
 
         relays[r].r.state = 0;           // Avoid intempestive click on reset..
+        pinMode(relay_pins[r], OUTPUT); // 
+        digitalWrite(relays[r].r.pin, relays[r].r.state ? LOW:HIGH);
+
         relays[r].r.lastchange=now();
 
 #ifdef DEBUG_CONF
@@ -217,7 +237,7 @@ void setup() {
   dht.setup(DHTPIN);
   dht2.setup(DHT2PIN);
 
-  //  analogReadResolution(10);
+  //analogReadResolution(ADC_RES_BITS);
 
 
 #ifdef ARDUINO_ARCH_AVR
@@ -254,6 +274,10 @@ void setup() {
   */
 
   relay_conf_red = 0;
+
+#ifdef DEBUG_CONF
+  log_rules();
+#endif
 
 //    evaluate();
 }
@@ -418,6 +442,20 @@ uint32_t t;
                     out_stat();
                 }
                 break;
+            case 'I':
+                t = strtoul(value,NULL,0);
+                if((t>=60) && (t < 2000000)) {
+                    water_interval = t;
+                    out_stat();
+                }
+                break;
+            case 'L':
+                t = strtoul(value,NULL,0);
+                if((t>=60) && (t < 2000000)) {
+                    water_limit = t;
+                    out_stat();
+                }
+                break;
             default:
                  Serial.print("NAK:");
                  Serial.print(key[0]);
@@ -457,7 +495,11 @@ uint32_t t;
                  Serial.print(result_str());
                  Serial.print("\n");
                  break;
-
+            case 'D':
+                 log_rules();
+                 log_relays();
+                 //print_stat();
+                 break;
             default:
                  Serial.print("NAK:");
                  Serial.print(key[0]);
@@ -604,13 +646,43 @@ while (Serial.available())
 }
 }
 
+void lis_hall_amp() {
+
+        double tmp, tmp_raw, tmp_avg, tmp_max;
+        tmp = analogRead(HALL_IN); // discard first reading
+        double avg_total = 0;
+        delay(10);
+        uint32_t end_time = micros() + 1000000/AC_HZ ; // Sample a bit more than a whole 50/60 Hz period
+
+        tmp_avg = ((double)analogRead(HALL_IN)) - (2.5 * ( (1<<ADC_RES_BITS) / VOLTS) );
+        tmp_max = 0;
+        uint32_t cur_time = micros();
+        uint32_t total_time = 0;
+        uint32_t last_time;
+        while((cur_time <= end_time) || (( cur_time - end_time ) > 1000000000 )) {
+            tmp_raw = ((double)analogRead(HALL_IN)) - ((VOLTS/2.0) * ( (1<<ADC_RES_BITS) / VOLTS) ); // offset to 0
+            tmp_avg = ((tmp_avg * amp_filter) + tmp_raw) / (amp_filter + 1) ; // crude low-pass
+            tmp = (tmp_avg <0) ? -tmp_avg : tmp_avg;
+
+            tmp_max = tmp > tmp_max ? tmp : tmp_max;
+            last_time=cur_time;
+            cur_time = micros();
+            if((cur_time-last_time) < 1000000){
+                avg_total += tmp * (cur_time-last_time);
+                total_time += cur_time-last_time ;
+            }
+        }
+//        current_amp_max = tmp_max  ;
+        current_amp = (avg_total / total_time) * (VOLTS / (1<<ADC_RES_BITS)) ;
+}
+
 
 
 
 void lis_analog() {
 
     digitalWrite(SOIL_EN, HIGH);
-    delay(100);
+    delay(20);
     lis_cmd();
     for(uint8_t pin=0;pin<ANALOG_PINS;pin++) {
         analog[pin] = analogRead(pin);
@@ -653,10 +725,10 @@ void out_stat(){
          Serial.print(',');
          Serial.print(analog[3]);
          Serial.print(',');
-         Serial.print(analog[4]);
+         Serial.print(current_amp);
          delay(100);
          Serial.print(',');
-         Serial.print(analog[5]);
+         Serial.print(0);
          Serial.print(',');
          Serial.print(water_total);
          Serial.print(',');
@@ -683,6 +755,7 @@ void loop() {
         else{
             lis_capteur();
             lis_analog();
+            lis_hall_amp();
         }
         red = true;
         if((sensors_read_count % 8)==0){
@@ -839,7 +912,7 @@ uint32_t booloperate(uint8_t flags, int32_t left, int32_t right) {
 
 void evaluate() {
     result = 0;
-    right_now = now();
+//    right_now = now();
     for(uint8_t k=0;k<COND_NR;k++) {
         uint8_t l;
         for(l=0;l<sizeof(condition);l++) {
@@ -909,7 +982,7 @@ void actuate_relays() {
 #endif
          if (r->state != new_state) {
              if(((r->type& TYPE_WAIT) == 0) || (r->lastchange < now() - TYPE_WAIT_SECS) ) {
-                 right_now = now();
+//                 right_now = now();
                  
                  log_event("relay",r->pin,new_state,right_now - r->lastchange) ;
                  r->state = new_state;
@@ -939,5 +1012,61 @@ void actuate_relays() {
              }
         }
      }
+  }
+}
+
+
+void log_rules() {
+    for(uint8_t k=0;k<COND_NR;k++) {
+        uint8_t l;
+        for(l=0;l<sizeof(condition);l++) {
+            cond.data[l] = EEPROM.read(START_ADDR + (k*sizeof(condition)) + l);
+        }
+        Serial.print("DBG:RULE:");
+        Serial.print(k);
+        Serial.print(" addr=");
+        Serial.print(START_ADDR + (k*sizeof(condition)));
+        Serial.print(" flags=");
+        Serial.print(cond.leaf.flags);
+        Serial.print(" left=");
+        Serial.print(cond.leaf_mod.left);
+        Serial.print(" mod=");
+        Serial.print(cond.leaf_mod.modulo);
+        Serial.print(" mright=");
+        Serial.print(cond.leaf_mod.right);
+        Serial.print(" nleft=");
+        Serial.print(cond.node.left);
+        Serial.print(" nright=");
+        Serial.print(cond.node.right);
+        Serial.print('\n');
+    }
+}
+
+void log_result() {
+        Serial.print("DBG:RESULT:");
+        for (uint8_t iter=0;iter<COND_NR;iter++) {
+            Serial.print((result >> iter) & 1);
+            if(iter!=COND_NR-1)
+                Serial.print(',');
+        }
+        Serial.print('\n');
+}
+
+void log_relays() {
+  for(uint8_t i=0;i<sizeof(relay_pins);i++) {
+     relay *r = &relays[i].r;
+     Serial.print("DBG:RELAY:");
+     Serial.print(i);
+     Serial.print(',');
+     Serial.print(r->pin);
+     Serial.print(',');
+     Serial.print(r->type);
+     Serial.print(',');
+     Serial.print(r->rule);
+     Serial.print(',');
+     Serial.print(r->state);
+     Serial.print(',');
+     Serial.print(r->lastchange);
+     Serial.print('\n');
   }
 }
