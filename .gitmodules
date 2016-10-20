@@ -1,3 +1,6 @@
 [submodule "libraries/arduino-DHT"]
 	path = libraries/arduino-DHT
 	url = https://github.com/markruys/arduino-DHT
+[submodule "libraries/Time"]
+	path = libraries/Time
+	url = https://github.com/PaulStoffregen/Time
