@@ -28,16 +28,22 @@ def open_port():
         bytesize=serial.SEVENBITS,
         timeout=1,
     )
-    ser.port = '/dev/ttyACM12'
-    try:
-        ser.open()
-    except serial.serialutil.SerialException:
-        try:
-            ser.port='/dev/ttyACM13'
-            ser.open()
-        except serial.serialutil.SerialException:
-            pass
-        pass
+
+    for port_prefix in ('COM','/dev/ttyUSB','/dev/ttyACM'):
+        for port_num in range(0,20):
+            port_name = port_prefix + str(port_num)
+            if ((port_prefix == 'COM') or (os.path.exists(port_name))):
+                ser.port = port_name
+                try:
+                    ser.open()
+                except serial.serialutil.SerialException:
+                    pass
+                if ser.isOpen():
+                    print "Opened port",ser.port
+                    break;
+        else:
+            continue
+        break
 
     if ser.isOpen():   
 #        ser.setDTR(False)
@@ -45,9 +51,13 @@ def open_port():
 #        ser.setDTR(True)
         while(ser.inWaiting() > 0):
             junk = ser.read(1)
+
+        ser.write("U=" + str(int(time.time())) + '\n')
         return True
     else:
+        print "Couldnt open any port..."
         return False
+
 
 
 def reset_port():
