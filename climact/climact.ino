@@ -611,7 +611,7 @@ void lis_capteur() {
       print_stat(stat2);
 #endif
       if(dht2.getStatus() >0){
-          log_event("sensor",0,dht2.getStatus(),-1);
+          log_event("sensor",1,dht2.getStatus(),-1);
       }
         lis_cmd();
 }
