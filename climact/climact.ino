@@ -28,7 +28,7 @@ uint8_t time_is_set = 0;
 // *********************************************
 
 #define HZ 100
-#define SAMPLING_PERIOD  5 //seconds. Minimum 2s for DHT22
+#define SAMPLING_PERIOD  10 //seconds. Minimum 2s for DHT22
 
 uint8_t relay_conf_red = 0;
 
@@ -86,12 +86,16 @@ uint32_t water_limit = 60;
 float water_total = 0;
 
 
-#define AC_HZ 50
-#define HALL_SENS 185      // mV/A , 5A  acs712 hall sensor
+#define AC_HZ 10
+ #define HALL_SENS 185      // mV/A , 5A  acs712 hall sensor
 // #define HALL_SENS 100   // mV/A , 20A acs712 hall sensor
-// #define HALL_SENS 66    // mV/A , 30A acs712 hall sensor
+//#define HALL_SENS 66    // mV/A , 30A acs712 hall sensor
 float current_amp = 0;
 int amp_filter = 2; // samples averaged as a crude low-pass
+
+#define AMP_BUFF 8
+double amp_buff[AMP_BUFF];
+int8_t amp_buff_ready = 0;
 
 long sensors_read_count = 0;
 
@@ -126,6 +130,9 @@ DHT dht,dht2;
 #define TYPE_TEMP_DOWN   1 << 3   // Device cools the place
 #define TYPE_HUM_UP   1 << 4   // Device ups humidity level
 #define TYPE_HUM_DOWN   1 << 5   // Device downs humidity level
+#define TYPE_RESTART    1 << 6   // Device can fail to start.
+                                 // Current consumption will be checked
+                                 // and device restarted when needed ..
 
 
 #ifdef DEBUG_FAST
@@ -148,6 +155,7 @@ union relay_store {
     }
 
 relays[2];
+float amps[2];
 
 struct sensor_state_d {
    float temp1;
@@ -273,11 +281,13 @@ void setup() {
   close_gardena_solenoid();
   */
 
+  amp_buff_ready = 0;
   relay_conf_red = 0;
 
 #ifdef DEBUG_CONF
   log_rules();
 #endif
+  Serial.print("DBG:RESTART:");
 
 //    evaluate();
 }
@@ -652,7 +662,7 @@ void lis_hall_amp() {
         tmp = analogRead(HALL_IN); // discard first reading
         double avg_total = 0;
         delay(10);
-        uint32_t end_time = micros() + 1000000/AC_HZ ; // Sample a bit more than a whole 50/60 Hz period
+        uint32_t end_time = micros() + (1000000/AC_HZ) ; // Sample a bit more than a whole 50/60 Hz period
 
         tmp_avg = ((double)analogRead(HALL_IN)) - (2.5 * ( (1<<ADC_RES_BITS) / VOLTS) );
         tmp_max = 0;
@@ -668,12 +678,17 @@ void lis_hall_amp() {
             last_time=cur_time;
             cur_time = micros();
             if((cur_time-last_time) < 1000000){
-                avg_total += tmp * (cur_time-last_time);
+                avg_total += abs(tmp_raw) * (cur_time-last_time);
                 total_time += cur_time-last_time ;
             }
         }
 //        current_amp_max = tmp_max  ;
-        current_amp = (avg_total / total_time) * (VOLTS / (1<<ADC_RES_BITS)) ;
+//        current_amp = (avg_total / total_time) * (VOLTS / (1<<ADC_RES_BITS)) ;
+        current_amp =( (avg_total / total_time) * (VOLTS / (1<<ADC_RES_BITS))) / (HALL_SENS /1000.0) ;
+        amp_buff[(sensors_read_count +1) % AMP_BUFF]=current_amp;
+        if(sensors_read_count >= AMP_BUFF -1) {
+            amp_buff_ready = !0;
+        }
 }
 
 
@@ -750,6 +765,7 @@ void loop() {
             delay (600);
             lis_capteur();
             delay (1600);
+            lis_hall_amp();
             first=false;
         }
         else{
