@@ -103,6 +103,10 @@ TYPE_TEMP_UP  = 1 << 2   #// Device warms the place
 TYPE_TEMP_DOWN =  1 << 3   #// Device cools the place
 TYPE_HUM_UP  = 1 << 4   #// Device ups humidity level
 TYPE_HUM_DOWN =  1 << 5   #// Device downs humidity level
+TYPE_PROBESTART  =  (1 << 6)   #// Device can fail to start.
+                            #// Current consumption will be checked
+                            #// and device restarted when needed ..
+
 
 rules_count=0;
 start_adress = 128;
@@ -181,7 +185,7 @@ time.sleep(0.2)
 write_rules()
 time.sleep(0.2)
 relay_adress = 64;
-write_relay(make_relay(0,TYPE_LIGHT|TYPE_TEMP_UP,7,0))
+write_relay(make_relay(0,TYPE_LIGHT|TYPE_TEMP_UP|TYPE_PROBESTART,7,0))
 time.sleep(1.2)
 write_relay(make_relay(0,TYPE_LIGHT|TYPE_TEMP_UP,8,0))
 time.sleep(0.2)

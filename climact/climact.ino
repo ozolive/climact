@@ -130,7 +130,7 @@ DHT dht,dht2;
 #define TYPE_TEMP_DOWN   1 << 3   // Device cools the place
 #define TYPE_HUM_UP   1 << 4   // Device ups humidity level
 #define TYPE_HUM_DOWN   1 << 5   // Device downs humidity level
-#define TYPE_RESTART    1 << 6   // Device can fail to start.
+#define TYPE_PROBESTART    1 << 6   // Device can fail to start.
                                  // Current consumption will be checked
                                  // and device restarted when needed ..
 
@@ -155,7 +155,24 @@ union relay_store {
     }
 
 relays[2];
-float amps[2];
+
+struct relay_dat {
+    float amp_on;
+    float amp_off;
+    float amp_exp;
+    float amp_before;
+    time_t time;
+    uint8_t step;
+    int8_t ready;
+    }
+relays_dat[2];
+
+
+#define STEP_STARTING 1
+#define STEP_WAITING 2
+#define STEP_PROBING 3
+#define STEP_FAIL 3
+#define STEP_READY 8
 
 struct sensor_state_d {
    float temp1;
@@ -209,6 +226,11 @@ void read_relay_conf(){
         digitalWrite(relays[r].r.pin, relays[r].r.state ? LOW:HIGH);
 
         relays[r].r.lastchange=now();
+        relays_dat[r].step = STEP_READY;
+        relays_dat[r].ready = !0;
+        relays_dat[r].amp_on = 0;
+        relays_dat[r].amp_off = 0;
+        relays_dat[r].amp_exp = 0.6;
 
 #ifdef DEBUG_CONF
         Serial.print("DBG:RELAY:Red conf for relay ");
@@ -287,7 +309,7 @@ void setup() {
 #ifdef DEBUG_CONF
   log_rules();
 #endif
-  Serial.print("DBG:RESTART:");
+  Serial.print("DBG:RESTART:\n");
 
 //    evaluate();
 }
@@ -798,6 +820,7 @@ void loop() {
         read_relay_conf();
         evaluate();
         actuate_relays();
+        follow_relay_state();
 
         delay(100);
 
@@ -971,6 +994,7 @@ void evaluate() {
 void actuate_relays() {
   for(uint8_t i=0;i<sizeof(relay_pins);i++) {
      relay *r = &relays[i].r;
+     relay_dat *rd = &relays_dat[i];
 
 #ifdef DEBUG_ACT
      delay(200);
@@ -996,13 +1020,14 @@ void actuate_relays() {
              Serial.print(new_state);
              Serial.print('\n');
 #endif
-         if (r->state != new_state) {
+         if ((r->state != new_state) && rd->ready ) {
              if(((r->type& TYPE_WAIT) == 0) || (r->lastchange < now() - TYPE_WAIT_SECS) ) {
 //                 right_now = now();
                  
                  log_event("relay",r->pin,new_state,right_now - r->lastchange) ;
                  r->state = new_state;
-                 digitalWrite(r->pin,r->state?LOW:HIGH);
+                 set_relay_state(i);
+//                 digitalWrite(r->pin,r->state?LOW:HIGH);
                  r->lastchange = right_now;
 
                  if ((r->type& TYPE_WAIT) != 0) {
@@ -1031,6 +1056,63 @@ void actuate_relays() {
   }
 }
 
+void set_relay_state(uint8_t i) {
+    uint8_t state = relays[i].r.state;
+    if (!state) {
+        float last_amp = current_amp;
+        digitalWrite(relays[i].r.pin,HIGH);
+        lis_hall_amp();
+        relays_dat[i].amp_off = last_amp - current_amp;
+    } else {
+        relays_dat[i].step = STEP_WAITING;
+        relays_dat[i].time = now();
+    }
+}
+
+time_t last_start = 0;
+
+void follow_relay_state(){
+    uint8_t has_probe = 0;
+    for (uint8_t i = 0;i<sizeof(relay_pins);i++) {
+        relay *r = &relays[i].r;
+        relay_dat *rd = &relays_dat[i];
+        if (rd->step == STEP_PROBING) {
+            has_probe = !0;
+            if((right_now - rd->time) > 60) {
+                rd->amp_on = current_amp - rd->amp_before;
+                rd->step = STEP_READY;
+                has_probe = 0;
+                if((r->type & TYPE_PROBESTART) == 0) {
+                    if(rd->amp_on < rd->amp_exp) {
+                        rd->step = STEP_FAIL;
+                        rd->time = right_now;
+                        digitalWrite(relays[i].r.pin,HIGH);
+                        lis_hall_amp();
+
+                        log_event("probe_fail",i,0,0);
+                    }
+                }
+            }
+        }
+    }
+    for (uint8_t i = 0;i<sizeof(relay_pins);i++) {
+        relay *r = &relays[i].r;
+        relay_dat *rd = &relays_dat[i];
+        if ((rd->step == STEP_WAITING) && ((right_now - rd->time) > 2) && (!has_probe) ) {
+            //lis_hall_amp();
+            rd->amp_before = current_amp;
+            digitalWrite(relays[i].r.pin,LOW);
+            rd->time = right_now;
+            //last_start= right_now;
+            rd->step = STEP_PROBING;
+            has_probe = !0;
+        } else if ((rd->step == STEP_FAIL) && ((right_now - rd->time) > 30) && (!has_probe)  ) {
+                rd->step = STEP_WAITING;
+                rd->time = right_now;
+        }
+    }
+
+}
 
 void log_rules() {
     for(uint8_t k=0;k<COND_NR;k++) {
