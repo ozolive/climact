@@ -311,6 +311,8 @@ void setup() {
 #endif
   Serial.print("DBG:RESTART:\n");
 
+  log_event("restart",0,0,-1);
+
 //    evaluate();
 }
 
@@ -1089,7 +1091,10 @@ void follow_relay_state(){
                         digitalWrite(relays[i].r.pin,HIGH);
                         lis_hall_amp();
 
-                        log_event("probe_fail",i,0,0);
+                        log_event("probe_fail",relays[i].r.pin,i,0);
+                    }
+                    else {
+                        log_event("probe_success",relays[i].r.pin,i,0);
                     }
                 }
             }
